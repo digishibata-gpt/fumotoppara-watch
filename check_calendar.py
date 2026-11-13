@@ -64,3 +64,24 @@ async def main():
         await browser.close()
 
 asyncio.run(main())
+
+# Gmail送信テスト（手動実行時のみ）
+import os
+import smtplib
+from email.message import EmailMessage
+
+if os.environ.get("MAIL_TEST") == "1":
+    address = os.environ["GMAIL_ADDRESS"]
+    password = os.environ["GMAIL_APP_PASSWORD"]
+
+    message = EmailMessage()
+    message["From"] = address
+    message["To"] = address
+    message["Subject"] = "ふもとっぱら空き監視：メール送信テスト"
+    message.set_content("Gmail通知の接続テストに成功しました。これは空き通知ではありません。")
+
+    with smtplib.SMTP_SSL("smtp.gmail.com", 465, timeout=30) as smtp:
+        smtp.login(address, password)
+        smtp.send_message(message)
+
+    print("Gmail test message sent.")
