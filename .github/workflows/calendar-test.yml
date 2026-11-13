@@ -18,14 +18,24 @@ jobs:
           python-version: '3.12'
       - run: pip install playwright==1.56.0
       - run: python -m playwright install --with-deps chromium
-      - run: python check_calendar.py
-      - name: Gmail notification test
-        if: github.event_name == 'workflow_dispatch'
+      - name: Restore notification state
+        uses: actions/cache/restore@v4
+        with:
+          path: notification_state.json
+          key: fumotoppara-state-${{ github.run_id }}
+          restore-keys: |
+            fumotoppara-state-
+      - name: Check calendar and notify
         env:
-          MAIL_TEST: '1'
           GMAIL_ADDRESS: ${{ secrets.GMAIL_ADDRESS }}
           GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
         run: python check_calendar.py
+      - name: Save notification state
+        if: success()
+        uses: actions/cache/save@v4
+        with:
+          path: notification_state.json
+          key: fumotoppara-state-${{ github.run_id }}
       - uses: actions/upload-artifact@v4
         if: always()
         with:
