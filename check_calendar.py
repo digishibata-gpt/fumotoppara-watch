@@ -4,51 +4,63 @@ from pathlib import Path
 from playwright.async_api import async_playwright
 
 URL = "https://reserve.fumotoppara.net/reserved/reserved-calendar-list"
-OUT = Path("diagnostics")
-OUT.mkdir(exist_ok=True)
+TARGET_DATE = "12/31"
+TARGET_ITEM = "キャンプ宿泊"
 
 async def main():
     async with async_playwright() as p:
         browser = await p.chromium.launch(headless=True)
         page = await browser.new_page()
-        response = await page.goto(URL, wait_until="networkidle", timeout=60000)
-        await page.screenshot(path=str(OUT / "calendar.png"), full_page=True)
+        response = await page.goto(
+            URL, wait_until="networkidle", timeout=60000
+        )
 
-        data = await page.evaluate("""() => {
-          const tables = [...document.querySelectorAll('table')];
-          return {
-            title: document.title,
-            body_has_dec31: document.body.innerText.includes('12/31'),
-            tables: tables.map((table, index) => ({
-              index,
-              rows: [...table.querySelectorAll('tr')].map(row =>
-                [...row.querySelectorAll('th,td')].map(cell => ({
-                  text: cell.innerText.trim(),
-                  html: cell.outerHTML.slice(0, 1000)
-                }))
-              )
-            })),
-            matching_elements: [...document.querySelectorAll('body *')]
-              .filter(el => el.children.length === 0 &&
-                (el.textContent || '').trim() === '12/31')
-              .slice(0, 10).map(el => ({
-                html: el.parentElement?.outerHTML.slice(0, 4000)
-              }))
-          };
-        }""")
+        if not response or response.status != 200:
+            raise RuntimeError("Calendar could not be loaded")
 
-        result = {
-            "http_status": response.status if response else None,
-            "data": data,
-            "availability_confirmed": False
-        }
-        (OUT / "result.json").write_text(
+        result = await page.evaluate("""({date, item}) => {
+            for (const table of document.querySelectorAll('table')) {
+                const rows = [...table.querySelectorAll('tr')];
+                const headers = [...rows[0]?.querySelectorAll('th,td') || []];
+                const column = headers.findIndex(cell =>
+                    cell.innerText.trim().split(/\\s+/)[0] === date
+                );
+                if (column < 0) continue;
+                for (const row of rows.slice(1)) {
+                    const cells = [...row.querySelectorAll('th,td')];
+                    if (cells[0]?.innerText.trim() !== item) continue;
+                    return {
+                        date, item,
+                        symbol: cells[column]?.innerText.trim() ?? null,
+                        found: true
+                    };
+                }
+            }
+            return {date, item, symbol: null, found: false};
+        }""", {"date": TARGET_DATE, "item": TARGET_ITEM})
+
+        Path("diagnostics").mkdir(exist_ok=True)
+        Path("diagnostics/result.json").write_text(
             json.dumps(result, ensure_ascii=False, indent=2),
             encoding="utf-8"
         )
-        print("December 31 found:", data["body_has_dec31"])
-        print("Tables:", len(data["tables"]))
-        print("Diagnostic saved. No availability notification.")
+
+        symbol = result["symbol"]
+        if not result["found"] or symbol is None:
+            raise RuntimeError("Target date or item not found")
+
+        print("Date:", TARGET_DATE)
+        print("Item:", TARGET_ITEM)
+        print("Public calendar symbol:", symbol)
+
+        if symbol in ("○", "△"):
+            print("CANDIDATE: Check actual booking availability")
+        elif symbol == "×":
+            print("FULL: No public calendar availability")
+        else:
+            print("UNKNOWN: No availability conclusion")
+
+        print("Booking availability is NOT confirmed.")
         await browser.close()
 
 asyncio.run(main())
