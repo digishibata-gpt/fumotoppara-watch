@@ -1,5 +1,7 @@
 name: Calendar read test
 on:
+  schedule:
+    - cron: '*/5 * * * *'
   workflow_dispatch:
   push:
     paths:
