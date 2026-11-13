@@ -1,7 +1,5 @@
 import asyncio
 import json
-import re
-from datetime import datetime, timezone
 from pathlib import Path
 from playwright.async_api import async_playwright
 
@@ -10,57 +8,47 @@ OUT = Path("diagnostics")
 OUT.mkdir(exist_ok=True)
 
 async def main():
-    result = {
-        "checked_at_utc": datetime.now(timezone.utc).isoformat(),
-        "url": URL,
-        "status": "unknown"
-    }
-
     async with async_playwright() as p:
         browser = await p.chromium.launch(headless=True)
-        page = await browser.new_page(
-            locale="ja-JP",
-            timezone_id="Asia/Tokyo",
-            viewport={"width": 1440, "height": 1100}
+        page = await browser.new_page()
+        response = await page.goto(URL, wait_until="networkidle", timeout=60000)
+        await page.screenshot(path=str(OUT / "calendar.png"), full_page=True)
+
+        data = await page.evaluate("""() => {
+          const tables = [...document.querySelectorAll('table')];
+          return {
+            title: document.title,
+            body_has_dec31: document.body.innerText.includes('12/31'),
+            tables: tables.map((table, index) => ({
+              index,
+              rows: [...table.querySelectorAll('tr')].map(row =>
+                [...row.querySelectorAll('th,td')].map(cell => ({
+                  text: cell.innerText.trim(),
+                  html: cell.outerHTML.slice(0, 1000)
+                }))
+              )
+            })),
+            matching_elements: [...document.querySelectorAll('body *')]
+              .filter(el => el.children.length === 0 &&
+                (el.textContent || '').trim() === '12/31')
+              .slice(0, 10).map(el => ({
+                html: el.parentElement?.outerHTML.slice(0, 4000)
+              }))
+          };
+        }""")
+
+        result = {
+            "http_status": response.status if response else None,
+            "data": data,
+            "availability_confirmed": False
+        }
+        (OUT / "result.json").write_text(
+            json.dumps(result, ensure_ascii=False, indent=2),
+            encoding="utf-8"
         )
-
-        try:
-            response = await page.goto(
-                URL,
-                wait_until="domcontentloaded",
-                timeout=45000
-            )
-            result["http_status"] = response.status if response else None
-            await page.wait_for_timeout(12000)
-
-            body = await page.locator("body").inner_text(timeout=10000)
-            result["body_excerpt"] = body[:12000]
-            result["december_31_visible"] = bool(
-                re.search(r"12\s*[/月]\s*31|12月31日|2026[-/]12[-/]31", body)
-            )
-
-            result["status"] = (
-                "page_loaded"
-                if result["december_31_visible"]
-                else "target_not_verified"
-            )
-
-            await page.screenshot(
-                path=str(OUT / "calendar.png"),
-                full_page=True
-            )
-
-        except Exception as e:
-            result["error"] = str(e)
-            result["status"] = "error"
-
-        finally:
-            await browser.close()
-
-    (OUT / "result.json").write_text(
-        json.dumps(result, ensure_ascii=False, indent=2),
-        encoding="utf-8"
-    )
-    print(json.dumps(result, ensure_ascii=False, indent=2))
+        print("December 31 found:", data["body_has_dec31"])
+        print("Tables:", len(data["tables"]))
+        print("Diagnostic saved. No availability notification.")
+        await browser.close()
 
 asyncio.run(main())
