@@ -62,3 +62,83 @@ async def read_calendar():
             ).first.wait_for(timeout=20000)
             return await page.evaluate(
                 """item => [...document.querySelectorAll('
+                            """item => [...document.querySelectorAll('table')]
+                    .filter(table => table.getClientRects().length)
+                    .filter(table => table.rows[0]?.cells[0]?.matches('th.cell-corner'))
+                    .map(table => {
+                        const [header, ...rows] = table.rows;
+                        const plain = cell => cell.colSpan === 1 && cell.rowSpan === 1;
+                        const dates = [...header.cells].slice(1).map(cell =>
+                            plain(cell) && cell.matches('th.cell-date')
+                                ? [...cell.querySelectorAll(':scope > p')].map(p => p.innerText.trim())
+                                : []);
+                        const statuses = rows.filter(row =>
+                            row.cells[0]?.matches('th.cell-site') &&
+                            row.cells[0].innerText.trim() === item
+                        ).map(row => [...row.cells].every(plain)
+                            ? [...row.cells].slice(1).map(cell =>
+                                cell.matches('td.cell-date') ? cell.innerText.trim() : '')
+                            : []);
+                        return [dates, statuses];
+                    })""",
+                ITEM,
+            )
+        finally:
+            await browser.close()
+
+
+def send_mail(symbol):
+    address = os.environ["GMAIL_ADDRESS"]
+    password = os.environ["GMAIL_APP_PASSWORD"]
+    message = EmailMessage()
+    message["From"] = address
+    message["To"] = address
+    message["Subject"] = "【ふもとっぱら】12月31日に空き候補"
+    message.set_content(
+        f"{TARGET}チェックインの「{ITEM}」が公開カレンダーで「{symbol}」になりました。\n\n"
+        f"{URL}\n\n"
+        "実際に予約できるかは、ログイン後の予約画面でご確認ください。"
+    )
+    smtp = smtplib.SMTP_SSL("smtp.gmail.com", 465, timeout=30)
+    try:
+        smtp.login(address, password)
+        smtp.send_message(message)
+    finally:
+        smtp.close()
+
+
+async def main():
+    today = datetime.now(TOKYO).date()
+    if today > TARGET:
+        print("Target check-in date has passed")
+        return
+
+    symbol = calendar_symbol(await read_calendar(), today)
+    print(f"{TARGET} / {ITEM}: {symbol!r}")
+    if symbol is None:
+        raise RuntimeError("Could not verify target cell; no email sent")
+
+    was_available = False
+    if STATE.exists():
+        previous = json.loads(STATE.read_text(encoding="utf-8"))
+        was_available = previous["available"]
+        if type(was_available) is not bool:
+            raise ValueError("Invalid notification state")
+
+    available = symbol in {"○", "△"}
+    if available and not was_available:
+        send_mail(symbol)
+        print("Availability email sent")
+    else:
+        print("No new availability email")
+
+    temporary = STATE.with_suffix(".tmp")
+    temporary.write_text(
+        json.dumps({"available": available, "symbol": symbol}),
+        encoding="utf-8",
+    )
+    temporary.replace(STATE)
+
+
+if __name__ == "__main__":
+    asyncio.run(main())
