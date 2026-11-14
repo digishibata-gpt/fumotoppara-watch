@@ -1,4 +1,5 @@
 name: Calendar read test
+
 on:
   schedule:
     - cron: '*/5 * * * *'
@@ -7,12 +8,19 @@ on:
     paths:
       - 'check_calendar.py'
       - '.github/workflows/calendar-test.yml'
+
+concurrency:
+  group: fumotoppara-calendar-main
+  cancel-in-progress: false
+
 jobs:
   inspect:
     runs-on: ubuntu-24.04
     timeout-minutes: 8
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: main
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
@@ -22,23 +30,7 @@ jobs:
         uses: actions/cache/restore@v4
         with:
           path: notification_state.json
-          key: fumotoppara-state-${{ github.run_id }}
+          key: fumotoppara-state-${{ github.run_id }}-${{ github.run_attempt }}
           restore-keys: |
             fumotoppara-state-
-      - name: Check calendar and notify
-        env:
-          GMAIL_ADDRESS: ${{ secrets.GMAIL_ADDRESS }}
-          GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
-        run: python check_calendar.py
-      - name: Save notification state
-        if: success()
-        uses: actions/cache/save@v4
-        with:
-          path: notification_state.json
-          key: fumotoppara-state-${{ github.run_id }}
-      - uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: calendar-diagnostics
-          path: diagnostics/
-          retention-days: 3
+      -
