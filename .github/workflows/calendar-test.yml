@@ -33,7 +33,7 @@ jobs:
           key: fumotoppara-state-${{ github.run_id }}-${{ github.run_attempt }}
           restore-keys: |
             fumotoppara-state-
-            - name: Check calendar and notify
+      - name: Check calendar and notify
         env:
           GMAIL_ADDRESS: ${{ secrets.GMAIL_ADDRESS }}
           GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
