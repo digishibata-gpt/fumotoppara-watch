@@ -61,9 +61,7 @@ async def read_calendar():
                 ITEM, exact=True
             ).first.wait_for(timeout=20000)
             return await page.evaluate(
-                """item => [...document.querySelectorAll('
-                            """item => [...document.querySelectorAll('table')]
-                    .filter(table => table.getClientRects().length)
+      .filter(table => table.getClientRects().length)
                     .filter(table => table.rows[0]?.cells[0]?.matches('th.cell-corner'))
                     .map(table => {
                         const [header, ...rows] = table.rows;
