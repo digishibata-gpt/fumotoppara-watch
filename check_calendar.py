@@ -16,15 +16,41 @@ ITEM = "キャンプ宿泊"
 TOKYO = ZoneInfo("Asia/Tokyo")
 WEEKDAYS = "月火水木金土日"
 STATE = Path("notification_state.json")
+AVAILABLE = {"○", "△"}
+
+READ_TABLES = """
+item => [...document.querySelectorAll('table')]
+    .filter(table => table.getClientRects().length)
+    .filter(table => table.rows[0]?.cells[0]?.matches('th.cell-corner'))
+    .map(table => {
+        const [header, ...rows] = table.rows;
+        const plain = cell => cell.colSpan === 1 && cell.rowSpan === 1;
+        const dates = [...header.cells].slice(1).map(cell =>
+            plain(cell) && cell.matches('th.cell-date')
+                ? [...cell.querySelectorAll(':scope > p')].map(p => p.innerText.trim())
+                : []);
+        const statuses = rows.filter(row =>
+            row.cells[0]?.matches('th.cell-site') &&
+            row.cells[0].innerText.trim() === item
+        ).map(row => [...row.cells].every(plain)
+            ? [...row.cells].slice(1).map(cell =>
+                cell.matches('td.cell-date') ? cell.innerText.trim() : '')
+            : []);
+        return [dates, statuses];
+    })
+"""
 
 
 def calendar_symbol(tables, today):
+    if today > TARGET:
+        return None
+
     first = today.replace(day=1)
     offset = (TARGET - first).days
     candidates = []
 
     for header, rows in tables:
-        if today > TARGET or not 0 <= offset < len(header):
+        if not 0 <= offset < len(header):
             continue
         days = (first + timedelta(days=i) for i in range(len(header)))
         expected = [
@@ -60,27 +86,7 @@ async def read_calendar():
             await page.locator("th.cell-site").get_by_text(
                 ITEM, exact=True
             ).first.wait_for(timeout=20000)
-            return await page.evaluate(
-      .filter(table => table.getClientRects().length)
-                    .filter(table => table.rows[0]?.cells[0]?.matches('th.cell-corner'))
-                    .map(table => {
-                        const [header, ...rows] = table.rows;
-                        const plain = cell => cell.colSpan === 1 && cell.rowSpan === 1;
-                        const dates = [...header.cells].slice(1).map(cell =>
-                            plain(cell) && cell.matches('th.cell-date')
-                                ? [...cell.querySelectorAll(':scope > p')].map(p => p.innerText.trim())
-                                : []);
-                        const statuses = rows.filter(row =>
-                            row.cells[0]?.matches('th.cell-site') &&
-                            row.cells[0].innerText.trim() === item
-                        ).map(row => [...row.cells].every(plain)
-                            ? [...row.cells].slice(1).map(cell =>
-                                cell.matches('td.cell-date') ? cell.innerText.trim() : '')
-                            : []);
-                        return [dates, statuses];
-                    })""",
-                ITEM,
-            )
+            return await page.evaluate(READ_TABLES, ITEM)
         finally:
             await browser.close()
 
@@ -93,7 +99,8 @@ def send_mail(symbol):
     message["To"] = address
     message["Subject"] = "【ふもとっぱら】12月31日に空き候補"
     message.set_content(
-        f"{TARGET}チェックインの「{ITEM}」が公開カレンダーで「{symbol}」になりました。\n\n"
+        f"{TARGET}チェックインの「{ITEM}」が"
+        f"公開カレンダーで「{symbol}」になりました。\n\n"
         f"{URL}\n\n"
         "実際に予約できるかは、ログイン後の予約画面でご確認ください。"
     )
@@ -123,7 +130,7 @@ async def main():
         if type(was_available) is not bool:
             raise ValueError("Invalid notification state")
 
-    available = symbol in {"○", "△"}
+    available = symbol in AVAILABLE
     if available and not was_available:
         send_mail(symbol)
         print("Availability email sent")
